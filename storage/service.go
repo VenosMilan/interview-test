@@ -277,9 +277,7 @@ func (service *service) getLastIdOfRecord(file *os.File) (int64, error) {
 	var lastId int64
 
 	for {
-		var actualId int64
-
-		if err := binary.Read(file, binary.LittleEndian, &actualId); err == io.EOF {
+		if err := binary.Read(file, binary.LittleEndian, &lastId); err == io.EOF {
 			break
 		} else if err != nil {
 			return 0, errors.WithStack(err)
@@ -288,8 +286,6 @@ func (service *service) getLastIdOfRecord(file *os.File) (int64, error) {
 		if _, err := file.Seek(90, io.SeekCurrent); err != nil {
 			return 0, errors.WithStack(err)
 		}
-
-		lastId = actualId
 	}
 
 	return lastId, nil

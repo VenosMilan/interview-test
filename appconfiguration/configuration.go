@@ -31,6 +31,8 @@ func NewAppConfiguration() *Configuration {
 		logDebug = false
 	}
 
+	config.LogDebug = logDebug
+
 	if logDebug {
 		log.SetLevel(log.DebugLevel)
 	}
