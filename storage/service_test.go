@@ -47,7 +47,7 @@ func TestGetRecord(t *testing.T) {
 	assert.Equal(t, int64(9), record1.IntValue)
 }
 
-func TestCreateRecord(t *testing.T) {
+func TestCreateRecords(t *testing.T) {
 	t.Parallel()
 
 	tmpfile, err := os.CreateTemp("", "create_records.bin")

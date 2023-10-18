@@ -192,6 +192,7 @@ func (service *service) DeleteRecord(id int64) (bool, error) {
 		}
 
 		if actualId == id {
+			// offset -8 for rewrite id of record
 			_, err = service.storageFile.Seek(-8, io.SeekCurrent)
 
 			if err != nil {
@@ -204,6 +205,7 @@ func (service *service) DeleteRecord(id int64) (bool, error) {
 
 			deletedRecord = true
 		} else {
+			// offset 90 - skip to next record in file
 			_, err = service.storageFile.Seek(90, io.SeekCurrent)
 
 			if err != nil {
@@ -230,7 +232,14 @@ func (service *service) writerRecord(rec *record.Record, file *os.File) error {
 	}
 
 	strBytes := []byte(rec.StrValue)
-	strBytes = append(strBytes, make([]byte, 64-len(strBytes))...)
+
+	strLen := len(strBytes)
+
+	if strLen < 64 {
+		padding := make([]byte, 64-strLen)
+		strBytes = append(strBytes, padding...)
+	}
+
 	if _, err := file.Write(strBytes); err != nil {
 		return errors.WithStack(err)
 	}
