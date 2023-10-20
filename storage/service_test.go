@@ -64,32 +64,33 @@ func TestCreateRecords(t *testing.T) {
 
 	testingTime := time.Date(2023, 12, 31, 12, 42, 59, 987654321, time.Local)
 
-	testingRecords := make([]record.Record, 0)
-	testingRecords = append(testingRecords, record.Record{
+	rec1 := record.Record{
 		IntValue:  42,
 		StrValue:  "foo",
 		BoolValue: false,
 		TimeValue: &testingTime,
-	})
+	}
 
-	testingRecords = append(testingRecords, record.Record{
+	expectedIDRecord1 := int64(1)
+
+	createdID, err := service.CreateRecord(&rec1)
+	assert.NoError(t, err)
+	assert.NotZero(t, createdID)
+	assert.Equal(t, expectedIDRecord1, createdID)
+
+	rec2 := record.Record{
 		IntValue:  99,
 		StrValue:  "foo99",
 		BoolValue: true,
 		TimeValue: &testingTime,
-	})
-
-	for _, newRecord := range testingRecords {
-		createdID, err := service.CreateRecord(&newRecord)
-		assert.NoError(t, err)
-		assert.NotZero(t, createdID)
-
-		lastID, err := service.getLastIdOfRecord(tmpfile)
-
-		assert.NoError(t, err)
-		assert.Equal(t, lastID, createdID)
-		assert.Equal(t, newRecord.Id, lastID)
 	}
+
+	expectedIDRecord2 := int64(2)
+
+	createdIDRec2, err := service.CreateRecord(&rec2)
+	assert.NoError(t, err)
+	assert.NotZero(t, createdIDRec2)
+	assert.Equal(t, expectedIDRecord2, createdIDRec2)
 }
 
 func TestDeleteRecord(t *testing.T) {
@@ -107,31 +108,37 @@ func TestDeleteRecord(t *testing.T) {
 
 	testingTime := time.Date(2023, 12, 31, 12, 42, 59, 987654321, time.Local)
 
-	testingRecords := make([]record.Record, 0)
-	testingRecords = append(testingRecords, record.Record{
+	rec1 := record.Record{
 		IntValue:  42,
 		StrValue:  "foo",
-		BoolValue: false,
+		BoolValue: true,
 		TimeValue: &testingTime,
-	})
+	}
 
-	testingRecords = append(testingRecords, record.Record{
+	rec2 := record.Record{
 		IntValue:  99,
 		StrValue:  "foo99",
 		BoolValue: true,
 		TimeValue: &testingTime,
-	})
-
-	for _, newRecord := range testingRecords {
-		createdID, err := service.CreateRecord(&newRecord)
-		assert.NoError(t, err)
-		assert.NotZero(t, createdID)
-
-		deleted, err := service.DeleteRecord(createdID)
-
-		assert.NoError(t, err)
-		assert.Equal(t, true, deleted)
 	}
+
+	createdID1, err := service.CreateRecord(&rec1)
+	assert.NoError(t, err)
+	assert.NotZero(t, createdID1)
+
+	createdID2, err := service.CreateRecord(&rec2)
+	assert.NoError(t, err)
+	assert.NotZero(t, createdID2)
+
+	deleted1, err := service.DeleteRecord(createdID1)
+
+	assert.NoError(t, err)
+	assert.Equal(t, true, deleted1)
+
+	deleted2, err := service.DeleteRecord(createdID2)
+
+	assert.NoError(t, err)
+	assert.Equal(t, true, deleted2)
 }
 
 func TestGetRecordNotFound(t *testing.T) {

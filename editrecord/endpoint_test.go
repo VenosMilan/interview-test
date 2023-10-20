@@ -2,12 +2,10 @@ package editrecord
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"interviewtest/record"
 	"interviewtest/storage"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,16 +20,16 @@ import (
 const tmpStorageFilePath = "/tmp/edit_records.bin"
 
 func TestEditRecordSuccessful(t *testing.T) {
+	t.Parallel()
+
 	fileStorageService, err := storage.NewService(tmpStorageFilePath)
 
 	if err != nil {
 		t.Error(err)
 	}
 
-	defer t.Cleanup(func() {
-		os.Remove(tmpStorageFilePath)
-		fileStorageService.Close()
-	})
+	defer os.Remove(tmpStorageFilePath)
+	defer fileStorageService.Close()
 
 	service := NewService(fileStorageService)
 
@@ -65,20 +63,21 @@ func TestEditRecordSuccessful(t *testing.T) {
 		Id:        2,
 		IntValue:  190,
 		StrValue:  "foo+2",
-		BoolValue: true,
+		BoolValue: false,
 		TimeValue: &testingTime,
 	}
 
-	file, err := os.OpenFile(tmpStorageFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+	expectedRecordId1, err := fileStorageService.CreateRecord(&record1)
 
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
-	writerRecord(&record1, file)
-	writerRecord(&record2, file)
+	expectedRecordId2, err := fileStorageService.CreateRecord(&record2)
 
-	file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	type args struct {
 		service Service
@@ -95,48 +94,43 @@ func TestEditRecordSuccessful(t *testing.T) {
 		args:         args{service: service},
 		originalData: record1,
 		expectedData: expectedRecord1,
-		idURLParam:   int64(1),
+		idURLParam:   expectedRecordId1,
 	}, {
 		name:         "Edit record by id: 2",
 		args:         args{service: service},
 		originalData: record2,
 		expectedData: expectedRecord2,
-		idURLParam:   int64(2),
+		idURLParam:   expectedRecordId2,
 	}}
 
-	file, err = os.Open(tmpStorageFilePath)
+	for _, tt := range tests {
+		url := fmt.Sprintf("/records/%d", tt.idURLParam)
 
-	if err != nil {
-		t.Error(err)
-	}
+		router := mux.NewRouter()
+		router.Handle("/records/{id:[0-9]+}", MakePutRecordEndpoint(service)).Methods(http.MethodPut)
 
-	for _, tst := range tests {
-		tt := tst
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			url := fmt.Sprintf("/records/%d", tt.idURLParam)
+		inputDataBytes, _ := json.Marshal(tt.expectedData)
 
-			router := mux.NewRouter()
-			router.Handle("/records/{id:[0-9]+}", MakePutRecordEndpoint(service)).Methods(http.MethodPut)
+		req, _ := http.NewRequest("PUT", url, bytes.NewReader(inputDataBytes))
 
-			inputDataBytes, _ := json.Marshal(tt.expectedData)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
 
-			req, _ := http.NewRequest("PUT", url, bytes.NewReader(inputDataBytes))
+		assert.Equal(t, http.StatusOK, rr.Code)
 
-			rr := httptest.NewRecorder()
-			router.ServeHTTP(rr, req)
+		persistedData, err := fileStorageService.GetRecord(tt.idURLParam)
 
-			assert.Equal(t, http.StatusOK, rr.Code)
+		if err != nil {
+			t.Error(err)
+		}
 
-			persistedData := readFile(tt.idURLParam, file)
-
-			assert.NotEqual(t, int64(0), persistedData.Id)
-			assert.Equal(t, tt.expectedData.Id, persistedData.Id)
-			assert.Equal(t, tt.expectedData.IntValue, persistedData.IntValue)
-			assert.Equal(t, tt.expectedData.StrValue, persistedData.StrValue)
-			assert.Equal(t, tt.expectedData.BoolValue, persistedData.BoolValue)
-			assert.Equal(t, tt.expectedData.TimeValue, persistedData.TimeValue)
-		})
+		assert.NotNil(t, persistedData)
+		assert.NotEqual(t, int64(0), persistedData.Id)
+		assert.Equal(t, tt.expectedData.Id, persistedData.Id)
+		assert.Equal(t, tt.expectedData.IntValue, persistedData.IntValue)
+		assert.Equal(t, tt.expectedData.StrValue, persistedData.StrValue)
+		assert.Equal(t, tt.expectedData.BoolValue, persistedData.BoolValue)
+		assert.Equal(t, tt.expectedData.TimeValue, persistedData.TimeValue)
 	}
 }
 
@@ -164,13 +158,7 @@ func TestEditRecordInternalServerError(t *testing.T) {
 		TimeValue: &testingTime,
 	}
 
-	file, err := os.OpenFile(tmpStorageFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
-
-	if err != nil {
-		t.Error(err)
-	}
-
-	writerRecord(&record1, file)
+	fileStorageService.CreateRecord(&record1)
 
 	rec := `{
 		"IntValue": 42,
@@ -206,74 +194,5 @@ func TestEditRecordInternalServerError(t *testing.T) {
 
 			assert.Equal(t, http.StatusInternalServerError, rr.Code)
 		})
-	}
-}
-
-// writeRecord function for test
-func writerRecord(rec *record.Record, file *os.File) {
-	binary.Write(file, binary.LittleEndian, rec.Id)
-	binary.Write(file, binary.LittleEndian, rec.IntValue)
-
-	strBytes := []byte(rec.StrValue)
-	strBytes = append(strBytes, make([]byte, 64-len(strBytes))...)
-	file.Write(strBytes)
-
-	boolByte := byte(0)
-	if rec.BoolValue {
-		boolByte = byte(1)
-	}
-
-	file.Write([]byte{boolByte})
-
-	timeBytes, _ := rec.TimeValue.MarshalBinary()
-	timeLen := len(timeBytes)
-
-	if timeLen < 16 {
-		padding := make([]byte, 16-timeLen)
-		timeBytes = append(timeBytes, padding...)
-	}
-
-	file.Write(timeBytes)
-	file.Write([]byte{'\n'})
-
-}
-
-func readFile(targetID int64, file *os.File) *record.Record {
-	_, _ = file.Seek(0, io.SeekStart)
-
-	for {
-		var rec record.Record
-
-		if err := binary.Read(file, binary.LittleEndian, &rec.Id); err == io.EOF {
-			return nil
-		}
-
-		binary.Read(file, binary.LittleEndian, &rec.IntValue)
-
-		strBytes := make([]byte, 64)
-		file.Read(strBytes)
-
-		rec.StrValue = string(bytes.TrimRight(strBytes, string(rune(0))))
-
-		boolByte := make([]byte, 1)
-		file.Read(boolByte)
-
-		rec.BoolValue = boolByte[0] != 0
-
-		timeBytes := make([]byte, 16)
-		file.Read(timeBytes)
-		timeBytes = bytes.Trim(timeBytes, "\x00")
-
-		var t time.Time
-
-		t.UnmarshalBinary(timeBytes)
-
-		rec.TimeValue = &t
-
-		file.Seek(1, io.SeekCurrent)
-
-		if rec.Id == targetID {
-			return &rec
-		}
 	}
 }

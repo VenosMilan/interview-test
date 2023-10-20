@@ -18,6 +18,8 @@ import (
 const tmpStorageFilePath = "/tmp/create_records.bin"
 
 func TestCreationValidRecords(t *testing.T) {
+	t.Parallel()
+
 	fileStorageService, err := storage.NewService(tmpStorageFilePath)
 
 	if err != nil {
@@ -59,54 +61,50 @@ func TestCreationValidRecords(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		args       args
-		returnedID bool
-		inputData  record.Record
+		name               string
+		args               args
+		expectedReturnedID int64
+		inputData          record.Record
 	}{{
-		name:       "Create record with ID 1",
-		args:       args{service: service},
-		returnedID: true,
-		inputData:  record1,
+		name:               "Create record with ID 1",
+		args:               args{service: service},
+		expectedReturnedID: int64(1),
+		inputData:          record1,
 	}, {
-		name:       "Create record with ID 2",
-		args:       args{service: service},
-		returnedID: true,
-		inputData:  record2,
+		name:               "Create record with ID 2",
+		args:               args{service: service},
+		expectedReturnedID: int64(2),
+		inputData:          record2,
 	}, {
-		name:       "Create record with ID 3",
-		args:       args{service: service},
-		returnedID: true,
-		inputData:  record3,
+		name:               "Create record with ID 3",
+		args:               args{service: service},
+		expectedReturnedID: int64(3),
+		inputData:          record3,
 	}}
 
-	for _, tst := range tests {
-		tt := tst
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			inputDataBytes, _ := json.Marshal(tt.inputData)
+	for _, tt := range tests {
+		inputDataBytes, _ := json.Marshal(tt.inputData)
 
-			req, err := http.NewRequest("POST", "/create", bytes.NewReader(inputDataBytes))
-			if err != nil {
-				t.Fatal(err)
-			}
+		req, err := http.NewRequest("POST", "/create", bytes.NewReader(inputDataBytes))
+		if err != nil {
+			t.Fatal(err)
+		}
 
-			rr := httptest.NewRecorder()
+		rr := httptest.NewRecorder()
 
-			handler := MakePostCreateRecordEndpoint(service)
-			handler(rr, req)
+		handler := MakePostCreateRecordEndpoint(service)
+		handler(rr, req)
 
-			assert.Equal(t, rr.Code, http.StatusCreated)
-			assert.Equal(t, rr.Header().Get("Content-Type"), "application/json")
+		assert.Equal(t, rr.Code, http.StatusCreated)
+		assert.Equal(t, rr.Header().Get("Content-Type"), "application/json")
 
-			var response map[string]int64
-			err = json.NewDecoder(rr.Body).Decode(&response)
-			if err != nil {
-				t.Fatal(err)
-			}
+		var response map[string]int64
+		err = json.NewDecoder(rr.Body).Decode(&response)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-			assert.Equal(t, tt.returnedID, response["ID"] != 0)
-		})
+		assert.Equal(t, tt.expectedReturnedID, response["ID"])
 	}
 }
 

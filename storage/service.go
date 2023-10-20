@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 // Service interface that provides method for working with binary file storage
@@ -30,7 +31,7 @@ type service struct {
 // NewService constructor for create new binary file storage
 // constructor create binary file
 func NewService(fileStoragePath string) (Service, error) {
-	file, err := os.OpenFile(fileStoragePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+	file, err := os.OpenFile(fileStoragePath, os.O_CREATE|os.O_RDWR, os.ModePerm)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -104,21 +105,30 @@ func (service *service) GetRecord(id int64) (*record.Record, error) {
 }
 
 // CreateRecord method for create record in binary file
-// Method set uniq id for every record in binary file
-// Every record has last id + 1
+// ID of record is the defined position of the record in the file
+// Every new file is appended to end of file
 func (service *service) CreateRecord(rec *record.Record) (int64, error) {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
-	numberOfRecords, err := service.getLastIdOfRecord(service.storageFile)
+	currentPos, err := service.storageFile.Seek(0, io.SeekCurrent)
 
 	if err != nil {
 		return 0, errors.WithStack(err)
 	}
 
-	rec.Id = numberOfRecords + 1
+	position := int64(0)
 
-	if err := service.writerRecord(rec, service.storageFile); err != nil {
+	if currentPos != 0 {
+		// ID record must be set by position in storage file
+		// Position is set by actual size of file divide by size of one record
+		// 98 is size of one record
+		position = currentPos / 98
+	}
+
+	rec.Id = position + 1
+
+	if err := service.writeRecord(rec, service.storageFile); err != nil {
 		return 0, errors.WithStack(err)
 	}
 
@@ -155,7 +165,7 @@ func (service *service) EditRecord(id int64, updatedRecord *record.Record) (int6
 				return 0, errors.WithStack(err)
 			}
 
-			if err := service.writerRecord(updatedRecord, service.storageFile); err != nil {
+			if err := service.writeRecord(updatedRecord, service.storageFile); err != nil {
 				return 0, errors.WithStack(err)
 			}
 		} else {
@@ -222,7 +232,7 @@ func (service *service) Close() {
 	service.storageFile.Close()
 }
 
-func (service *service) writerRecord(rec *record.Record, file *os.File) error {
+func (service *service) writeRecord(rec *record.Record, file *os.File) error {
 	if err := binary.Write(file, binary.LittleEndian, rec.Id); err != nil {
 		return errors.WithStack(err)
 	}
@@ -274,28 +284,6 @@ func (service *service) writerRecord(rec *record.Record, file *os.File) error {
 		return errors.WithStack(err)
 	}
 
+	log.Debugf("Record %+v", rec)
 	return nil
-}
-
-func (service *service) getLastIdOfRecord(file *os.File) (int64, error) {
-	_, err := file.Seek(0, io.SeekStart)
-	if err != nil {
-		return 0, errors.WithStack(err)
-	}
-
-	var lastId int64
-
-	for {
-		if err := binary.Read(file, binary.LittleEndian, &lastId); err == io.EOF {
-			break
-		} else if err != nil {
-			return 0, errors.WithStack(err)
-		}
-
-		if _, err := file.Seek(90, io.SeekCurrent); err != nil {
-			return 0, errors.WithStack(err)
-		}
-	}
-
-	return lastId, nil
 }
