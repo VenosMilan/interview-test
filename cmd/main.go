@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"interviewtest/appconfiguration"
 	"interviewtest/createrecord"
@@ -10,10 +11,11 @@ import (
 	"interviewtest/healthcheck"
 	"interviewtest/storage"
 	"net/http"
+	"os"
+	"os/signal"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -40,11 +42,38 @@ func main() {
 	myRouter.Handle("/records/{id:[0-9]+}", editrecord.MakePutRecordEndpoint(putRecordService)).Methods(http.MethodPut)
 	myRouter.Handle("/records/{id:[0-9]+}", getrecord.MakeGetRecordEndpoint(getRecordService)).Methods(http.MethodGet)
 
-	log.Info("Service running")
-
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", appConf.ServerPort), corsOptions(myRouter)); err != nil {
-		log.Fatal(errors.WithStack(err))
+	srv := http.Server{
+		Addr:    fmt.Sprintf(":%s", appConf.ServerPort),
+		Handler: corsOptions(myRouter),
 	}
+
+	idleConnectionsClosed := shutDownServer(&srv)
+
+	log.Infof("Server listening on %s", srv.Addr)
+
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("HTTP server ListenAndServe Error: %v", err)
+	}
+
+	<-idleConnectionsClosed
+
+	log.Println("Server shutdown gracefully")
+}
+
+func shutDownServer(srv *http.Server) chan struct{} {
+	idleConnectionsClosed := make(chan struct{})
+
+	go func() {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt)
+		<-sigint
+		if err := srv.Shutdown(context.Background()); err != nil {
+			log.Printf("HTTP Server Shutdown Error: %v", err)
+		}
+		close(idleConnectionsClosed)
+	}()
+
+	return idleConnectionsClosed
 }
 
 func corsOptions(myRouter *mux.Router) http.Handler {

@@ -191,6 +191,7 @@ func TestEditRecord(t *testing.T) {
 	testingTimeForUpdate := time.Date(2022, 12, 31, 12, 42, 59, 987654321, time.Local)
 
 	update1 := record.Record{
+		Id:        1,
 		IntValue:  142,
 		StrValue:  "bee",
 		BoolValue: true,

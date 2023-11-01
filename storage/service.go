@@ -13,6 +13,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const recordSize = 98
+
 // Service interface that provides method for working with binary file storage
 type Service interface {
 	GetRecord(id int64) (*record.Record, error)
@@ -47,61 +49,59 @@ func (service *service) GetRecord(id int64) (*record.Record, error) {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
-	_, err := service.storageFile.Seek(0, io.SeekStart)
+	recPos := (id - 1) * recordSize
+
+	_, err := service.storageFile.Seek(recPos, io.SeekStart)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	for {
-		var rec record.Record
+	var rec record.Record
 
-		if err := binary.Read(service.storageFile, binary.LittleEndian, &rec.Id); err == io.EOF {
-			return nil, nil
-		} else if err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		if err := binary.Read(service.storageFile, binary.LittleEndian, &rec.IntValue); err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		strBytes := make([]byte, 64)
-		if _, err := service.storageFile.Read(strBytes); err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		rec.StrValue = string(bytes.TrimRight(strBytes, string(rune(0))))
-
-		boolByte := make([]byte, 1)
-		if _, err := service.storageFile.Read(boolByte); err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		rec.BoolValue = boolByte[0] != 0
-
-		timeBytes := make([]byte, 16)
-		if _, err := service.storageFile.Read(timeBytes); err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		timeBytes = bytes.Trim(timeBytes, "\x00")
-
-		var t time.Time
-
-		if err := t.UnmarshalBinary(timeBytes); err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		rec.TimeValue = &t
-
-		if _, err := service.storageFile.Seek(1, io.SeekCurrent); err != nil {
-			return nil, errors.WithStack(err)
-		}
-
-		if rec.Id == id {
-			return &rec, nil
-		}
+	if err := binary.Read(service.storageFile, binary.LittleEndian, &rec.Id); err == io.EOF {
+		return nil, nil
+	} else if err != nil {
+		return nil, errors.WithStack(err)
 	}
+
+	if err := binary.Read(service.storageFile, binary.LittleEndian, &rec.IntValue); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	strBytes := make([]byte, 64)
+	if _, err := service.storageFile.Read(strBytes); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	rec.StrValue = string(bytes.TrimRight(strBytes, string(rune(0))))
+
+	boolByte := make([]byte, 1)
+	if _, err := service.storageFile.Read(boolByte); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	rec.BoolValue = boolByte[0] != 0
+
+	timeBytes := make([]byte, 16)
+	if _, err := service.storageFile.Read(timeBytes); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	timeBytes = bytes.Trim(timeBytes, "\x00")
+
+	var t time.Time
+
+	if err := t.UnmarshalBinary(timeBytes); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	rec.TimeValue = &t
+
+	if _, err := service.storageFile.Seek(1, io.SeekCurrent); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return &rec, nil
 }
 
 // CreateRecord method for create record in binary file
@@ -111,22 +111,13 @@ func (service *service) CreateRecord(rec *record.Record) (int64, error) {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
-	currentPos, err := service.storageFile.Seek(0, io.SeekCurrent)
+	pos, err := service.storageFile.Seek(0, io.SeekEnd)
 
 	if err != nil {
 		return 0, errors.WithStack(err)
 	}
 
-	position := int64(0)
-
-	if currentPos != 0 {
-		// ID record must be set by position in storage file
-		// Position is set by actual size of file divide by size of one record
-		// 98 is size of one record
-		position = currentPos / 98
-	}
-
-	rec.Id = position + 1
+	rec.Id = pos/recordSize + 1
 
 	if err := service.writeRecord(rec, service.storageFile); err != nil {
 		return 0, errors.WithStack(err)
@@ -140,43 +131,17 @@ func (service *service) EditRecord(id int64, updatedRecord *record.Record) (int6
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
-	_, err := service.storageFile.Seek(0, io.SeekStart)
-	if err != nil {
+	recPos := (id - 1) * recordSize
+
+	if _, err := service.storageFile.Seek(recPos, io.SeekStart); err != nil {
 		return 0, errors.WithStack(err)
 	}
 
-	var updatedRecordId int64
-
-	for {
-		var actualId int64
-
-		if err := binary.Read(service.storageFile, binary.LittleEndian, &actualId); err == io.EOF {
-			break
-		} else if err != nil {
-			return 0, errors.WithStack(err)
-		}
-
-		if actualId == id {
-			updatedRecord.Id = actualId
-			updatedRecordId = actualId
-
-			_, err := service.storageFile.Seek(-8, io.SeekCurrent)
-			if err != nil {
-				return 0, errors.WithStack(err)
-			}
-
-			if err := service.writeRecord(updatedRecord, service.storageFile); err != nil {
-				return 0, errors.WithStack(err)
-			}
-		} else {
-			_, err := service.storageFile.Seek(90, io.SeekCurrent)
-			if err != nil {
-				return 0, errors.WithStack(err)
-			}
-		}
+	if err := service.writeRecord(updatedRecord, service.storageFile); err != nil {
+		return 0, errors.WithStack(err)
 	}
 
-	return updatedRecordId, nil
+	return updatedRecord.Id, nil
 }
 
 // DeleteRecord method delete record by id (set id to zero)
@@ -241,14 +206,8 @@ func (service *service) writeRecord(rec *record.Record, file *os.File) error {
 		return errors.WithStack(err)
 	}
 
-	strBytes := []byte(rec.StrValue)
-
-	strLen := len(strBytes)
-
-	if strLen < 64 {
-		padding := make([]byte, 64-strLen)
-		strBytes = append(strBytes, padding...)
-	}
+	strBytes := make([]byte, 64)
+	copy(strBytes, rec.StrValue)
 
 	if _, err := file.Write(strBytes); err != nil {
 		return errors.WithStack(err)
